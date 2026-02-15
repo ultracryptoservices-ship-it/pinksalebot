@@ -4,8 +4,9 @@ from telegram import Bot
 from telegram.constants import ParseMode
 import os
 import json
+import subprocess  # untuk git commands
 
-# ===== ENV (GitHub Actions) =====
+# ===== ENV =====
 TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = -1003685584078
 URL = "https://pinksale-trending.s3.amazonaws.com/trending.json"
@@ -32,7 +33,6 @@ def get_trending():
         response = requests.get(URL, timeout=10)
         response.raise_for_status()
         data = response.json()
-
         if isinstance(data, dict) and "trending" in data:
             return data["trending"]
         elif isinstance(data, dict):
@@ -58,22 +58,33 @@ def save_last_rank(rank_dict):
     with open(LAST_RANK_FILE, "w") as f:
         json.dump(rank_dict, f)
 
-# ===== Format full message (HTML) =====
+# ===== Git auto commit helper =====
+def git_commit_push():
+    try:
+        subprocess.run(["git", "config", "--global", "user.name", "github-actions"], check=True)
+        subprocess.run(["git", "config", "--global", "user.email", "actions@github.com"], check=True)
+        subprocess.run(["git", "add", LAST_RANK_FILE], check=True)
+        subprocess.run(["git", "commit", "-m", "Update last_rank.json [skip ci]"], check=True)
+        subprocess.run(["git", "push", "origin", "main"], check=True)
+        print("✅ last_rank.json committed & pushed")
+    except subprocess.CalledProcessError as e:
+        print("⚠️ Git push failed:", e)
+
+# ===== Format message =====
 def format_full_message(data, last_rank):
     message = "<b>Welcome to Pinksale Trending Alert.</b>\n\n"
     new_rank = {}
 
+    # Top 12
     message += "<b>Top 12 Trending Now:</b>\n"
-
     for i, item in enumerate(data[:12], 1):
         token_name = item.get("token", "Unknown")
         chain_id = item.get("chainId")
         address = item.get("address", "")
-        presale_base = CHAINID_URLS.get(chain_id, "")
-        link = presale_base + address if presale_base else ""
+        base = CHAINID_URLS.get(chain_id, "")
+        link = base + address if base else ""
 
         prev_rank = last_rank.get(token_name)
-
         if prev_rank is None:
             emoji = "⚪️"
         elif i < prev_rank:
@@ -84,26 +95,20 @@ def format_full_message(data, last_rank):
             emoji = "⚪️"
 
         new_rank[token_name] = i
+        token_html = f'<a href="{link}">{token_name}</a>' if link else token_name
+        message += f"{emoji} <b>{i}. {token_html}</b>\n"
 
-        if link:
-            link_html = f'<a href="{link}">{token_name}</a>'
-        else:
-            link_html = token_name
-
-        message += f"{emoji} <b>{i}. {link_html}</b>\n"
-
-    # ===== Next Trending =====
+    # Next Trending
     if len(data) > 12:
         message += "\n<b>Next Trending:</b>\n"
         for i, item in enumerate(data[12:], 13):
             token_name = item.get("token", "Unknown")
             chain_id = item.get("chainId")
             address = item.get("address", "")
-            presale_base = CHAINID_URLS.get(chain_id, "")
-            link = presale_base + address if presale_base else ""
+            base = CHAINID_URLS.get(chain_id, "")
+            link = base + address if base else ""
 
             prev_rank = last_rank.get(token_name)
-
             if prev_rank is None:
                 emoji = "⚪️"
             elif i < prev_rank:
@@ -114,31 +119,18 @@ def format_full_message(data, last_rank):
                 emoji = "⚪️"
 
             new_rank[token_name] = i
+            token_html = f'<a href="{link}">{token_name}</a>' if link else token_name
+            message += f"{emoji} <b>{i}. {token_html}</b>\n"
 
-            if link:
-                link_html = f'<a href="{link}">{token_name}</a>'
-            else:
-                link_html = token_name
-
-            message += f"{emoji} <b>{i}. {link_html}</b>\n"
-
-    # ===== Promotion =====
-    message += "\n<b>Promotion:</b>\n"
-    message += "Need expert marketing support for your project?\n"
-    message += "Visit our website to see how we can help:\n"
+    # Promotion & Contact
+    message += "\n<b>Promotion:</b>\nNeed expert marketing support for your project?\n"
     message += "https://cryptohub.marketing/\n\n"
-
-    # ===== Contact =====
-    message += "<b>Contact Us:</b>\n"
-    message += "☎️ For any questions or feedback about PinkSale trends,\n"
-    message += "please contact us @TrendingServicesAgent"
+    message += "<b>Contact Us:</b>\n☎️ For any questions, contact @TrendingServicesAgent"
 
     return message, new_rank
 
-# ===== Main job (RUN ONCE) =====
+# ===== Main job =====
 async def main():
-    print("🔎 Checking trending...")
-
     data = get_trending()
     if not data:
         print("⚠️ No trending data")
@@ -155,7 +147,8 @@ async def main():
             disable_web_page_preview=True
         )
         save_last_rank(new_rank)
-        print("✅ Update sent!")
+        git_commit_push()
+        print("✅ Update sent and last_rank.json updated")
     except Exception as e:
         print("❌ Failed to send:", e)
 
