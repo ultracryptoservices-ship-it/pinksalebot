@@ -1,17 +1,18 @@
 import asyncio
 import requests
-from telegram import Bot
-from telegram.constants import ParseMode
-from dotenv import load_dotenv
 import os
 import json
+from telegram import Bot
+from telegram.constants import ParseMode
 
-# ===== Load token =====
-load_dotenv("token.env")
+# ===== ENV VARIABLE (Render) =====
 TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = -1003685584078
 URL = "https://pinksale-trending.s3.amazonaws.com/trending.json"
 LAST_RANK_FILE = "last_rank.json"
+
+if not TOKEN:
+    raise ValueError("❌ BOT_TOKEN not found in environment variables")
 
 bot = Bot(token=TOKEN)
 
@@ -31,6 +32,7 @@ def get_trending():
         response = requests.get(URL, timeout=10)
         response.raise_for_status()
         data = response.json()
+
         if isinstance(data, dict) and "trending" in data:
             return data["trending"]
         elif isinstance(data, dict):
@@ -40,31 +42,36 @@ def get_trending():
             return []
         elif isinstance(data, list):
             return data
-        else:
-            return []
+        return []
     except Exception as e:
         print("❌ Error fetching data:", e)
         return []
 
 # ===== Load last rank =====
 def load_last_rank():
-    if os.path.exists(LAST_RANK_FILE):
-        with open(LAST_RANK_FILE, "r") as f:
-            return json.load(f)
+    try:
+        if os.path.exists(LAST_RANK_FILE):
+            with open(LAST_RANK_FILE, "r") as f:
+                return json.load(f)
+    except Exception as e:
+        print("⚠️ Failed to load last rank:", e)
     return {}
 
 # ===== Save last rank =====
 def save_last_rank(rank_dict):
-    with open(LAST_RANK_FILE, "w") as f:
-        json.dump(rank_dict, f)
+    try:
+        with open(LAST_RANK_FILE, "w") as f:
+            json.dump(rank_dict, f)
+    except Exception as e:
+        print("⚠️ Failed to save last rank:", e)
 
-# ===== Format full message (HTML) =====
+# ===== Format message =====
 def format_full_message(data, last_rank):
     message = "<b>Welcome to Pinksale Trending Alert.</b>\n\n"
     new_rank = {}
 
-    # ===== Top 12 Trending =====
     message += "<b>Top 12 Trending Now:</b>\n"
+
     for i, item in enumerate(data[:12], 1):
         token_name = item.get("token", "Unknown")
         chain_id = item.get("chainId")
@@ -73,6 +80,7 @@ def format_full_message(data, last_rank):
         link = presale_base + address if presale_base else ""
 
         prev_rank = last_rank.get(token_name)
+
         if prev_rank is None:
             emoji = "⚪️"
         elif i < prev_rank:
@@ -83,7 +91,7 @@ def format_full_message(data, last_rank):
             emoji = "⚪️"
 
         new_rank[token_name] = i
-        # Wrap links in HTML <a> (no preview anyway)
+
         if link:
             link_html = f'<a href="{link}">{token_name}</a>'
         else:
@@ -91,7 +99,6 @@ def format_full_message(data, last_rank):
 
         message += f"{emoji} <b>{i}. {link_html}</b>\n"
 
-    # ===== Next Trending =====
     if len(data) > 12:
         message += "\n<b>Next Trending:</b>\n"
         for i, item in enumerate(data[12:], 13):
@@ -102,6 +109,7 @@ def format_full_message(data, last_rank):
             link = presale_base + address if presale_base else ""
 
             prev_rank = last_rank.get(token_name)
+
             if prev_rank is None:
                 emoji = "⚪️"
             elif i < prev_rank:
@@ -112,6 +120,7 @@ def format_full_message(data, last_rank):
                 emoji = "⚪️"
 
             new_rank[token_name] = i
+
             if link:
                 link_html = f'<a href="{link}">{token_name}</a>'
             else:
@@ -119,22 +128,21 @@ def format_full_message(data, last_rank):
 
             message += f"{emoji} <b>{i}. {link_html}</b>\n"
 
-    # ===== Promotion Section =====
     message += "\n<b>Promotion:</b>\n"
     message += "Need expert marketing support for your project?\n"
     message += "Visit our website to see how we can help:\n"
     message += "https://cryptohub.marketing/\n\n"
 
-    # ===== Contact Section =====
     message += "<b>Contact Us:</b>\n"
     message += "☎️ For any questions or feedback about PinkSale trends,\n"
     message += "please contact us @TrendingServicesAgent"
 
     return message, new_rank
 
-# ===== Main async job =====
+# ===== Main job =====
 async def job():
     print("🔎 Checking trending...")
+
     data = get_trending()
     if not data:
         print("⚠️ No trending data")
@@ -144,23 +152,25 @@ async def job():
     message, new_rank = format_full_message(data, last_rank)
 
     try:
-        # Send single message with ALL previews disabled
         await bot.send_message(
             chat_id=CHANNEL_ID,
             text=message,
             parse_mode=ParseMode.HTML,
-            disable_web_page_preview=True  # ❌ disables all link previews
+            disable_web_page_preview=True
         )
         save_last_rank(new_rank)
         print("✅ Update sent!")
     except Exception as e:
         print("❌ Failed to send:", e)
 
-# ===== Async loop every 5 minutes =====
+# ===== Infinite loop with protection =====
 async def main():
     print("🚀 Bot started...")
     while True:
-        await job()
+        try:
+            await job()
+        except Exception as e:
+            print("🔥 Critical Error:", e)
         await asyncio.sleep(300)  # 5 minutes
 
 if __name__ == "__main__":
