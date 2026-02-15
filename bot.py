@@ -1,18 +1,18 @@
 import asyncio
 import requests
-import os
-import json
 from telegram import Bot
 from telegram.constants import ParseMode
+import os
+import json
 
-# ===== ENV VARIABLE (Render) =====
+# ===== ENV (GitHub Actions) =====
 TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = -1003685584078
 URL = "https://pinksale-trending.s3.amazonaws.com/trending.json"
 LAST_RANK_FILE = "last_rank.json"
 
 if not TOKEN:
-    raise ValueError("❌ BOT_TOKEN not found in environment variables")
+    raise ValueError("BOT_TOKEN not found in environment variables")
 
 bot = Bot(token=TOKEN)
 
@@ -39,7 +39,6 @@ def get_trending():
             for v in data.values():
                 if isinstance(v, list):
                     return v
-            return []
         elif isinstance(data, list):
             return data
         return []
@@ -49,23 +48,17 @@ def get_trending():
 
 # ===== Load last rank =====
 def load_last_rank():
-    try:
-        if os.path.exists(LAST_RANK_FILE):
-            with open(LAST_RANK_FILE, "r") as f:
-                return json.load(f)
-    except Exception as e:
-        print("⚠️ Failed to load last rank:", e)
+    if os.path.exists(LAST_RANK_FILE):
+        with open(LAST_RANK_FILE, "r") as f:
+            return json.load(f)
     return {}
 
 # ===== Save last rank =====
 def save_last_rank(rank_dict):
-    try:
-        with open(LAST_RANK_FILE, "w") as f:
-            json.dump(rank_dict, f)
-    except Exception as e:
-        print("⚠️ Failed to save last rank:", e)
+    with open(LAST_RANK_FILE, "w") as f:
+        json.dump(rank_dict, f)
 
-# ===== Format message =====
+# ===== Format full message (HTML) =====
 def format_full_message(data, last_rank):
     message = "<b>Welcome to Pinksale Trending Alert.</b>\n\n"
     new_rank = {}
@@ -99,6 +92,7 @@ def format_full_message(data, last_rank):
 
         message += f"{emoji} <b>{i}. {link_html}</b>\n"
 
+    # ===== Next Trending =====
     if len(data) > 12:
         message += "\n<b>Next Trending:</b>\n"
         for i, item in enumerate(data[12:], 13):
@@ -128,19 +122,21 @@ def format_full_message(data, last_rank):
 
             message += f"{emoji} <b>{i}. {link_html}</b>\n"
 
+    # ===== Promotion =====
     message += "\n<b>Promotion:</b>\n"
     message += "Need expert marketing support for your project?\n"
     message += "Visit our website to see how we can help:\n"
     message += "https://cryptohub.marketing/\n\n"
 
+    # ===== Contact =====
     message += "<b>Contact Us:</b>\n"
     message += "☎️ For any questions or feedback about PinkSale trends,\n"
     message += "please contact us @TrendingServicesAgent"
 
     return message, new_rank
 
-# ===== Main job =====
-async def job():
+# ===== Main job (RUN ONCE) =====
+async def main():
     print("🔎 Checking trending...")
 
     data = get_trending()
@@ -162,16 +158,6 @@ async def job():
         print("✅ Update sent!")
     except Exception as e:
         print("❌ Failed to send:", e)
-
-# ===== Infinite loop with protection =====
-async def main():
-    print("🚀 Bot started...")
-    while True:
-        try:
-            await job()
-        except Exception as e:
-            print("🔥 Critical Error:", e)
-        await asyncio.sleep(300)  # 5 minutes
 
 if __name__ == "__main__":
     asyncio.run(main())
